@@ -96,6 +96,29 @@ The following GCP APIs are enabled:
 - `iam.googleapis.com` - IAM
 - `cloudresourcemanager.googleapis.com` - Resource Manager
 
+## Service Accounts
+
+The infrastructure creates the following service accounts with appropriate IAM permissions:
+
+### Cloud Build Deployer (`cloudbuild-deployer`)
+
+Used for CI/CD deployments via Cloud Build.
+
+| Role | Purpose |
+|------|---------|
+| `roles/run.admin` | Deploy and manage Cloud Run services |
+| `roles/bigquery.admin` | Manage BigQuery datasets and tables |
+| `roles/iam.serviceAccountUser` | Act as other service accounts |
+
+### Ingestion API (`ingestion-api`)
+
+Used by the Ingestion API Cloud Run service.
+
+| Role | Purpose |
+|------|---------|
+| `roles/bigquery.dataEditor` | Insert and update data in BigQuery |
+| `roles/pubsub.publisher` | Publish messages to Pub/Sub topics |
+
 ## Artifact Registry
 
 Container images are stored in Artifact Registry:
@@ -120,9 +143,9 @@ docker push us-central1-docker.pkg.dev/sentrais-backbone/sentrais-repo/myimage:l
 After initial setup:
 
 1. **Link Billing Account** - Ensure billing is enabled for the project
-2. **Set up Service Accounts** - Create service accounts for CI/CD
-3. **Configure Remote State** - Enable GCS backend for Terraform state
-4. **Set up Workload Identity** - Configure secure authentication for Cloud Run
+2. **Configure Remote State** - Enable GCS backend for Terraform state
+3. **Set up Workload Identity** - Configure secure authentication for Cloud Run
+4. **Create Cloud Build Triggers** - Set up CI/CD pipelines
 
 ## License
 

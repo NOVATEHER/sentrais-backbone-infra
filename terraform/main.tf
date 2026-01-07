@@ -65,6 +65,68 @@ resource "google_artifact_registry_repository" "sentrais_repo" {
 }
 
 # =============================================================================
+# Service Accounts
+# =============================================================================
+
+# Cloud Build Deployer service account
+resource "google_service_account" "cloudbuild_deployer" {
+  account_id   = "cloudbuild-deployer"
+  display_name = "Cloud Build Deployer"
+  description  = "Service account for Cloud Build deployments"
+  project      = var.project_id
+
+  depends_on = [google_project_service.apis]
+}
+
+# Ingestion API service account
+resource "google_service_account" "ingestion_api" {
+  account_id   = "ingestion-api"
+  display_name = "Ingestion API Service"
+  description  = "Service account for the Ingestion API"
+  project      = var.project_id
+
+  depends_on = [google_project_service.apis]
+}
+
+# =============================================================================
+# IAM Bindings - Cloud Build Deployer
+# =============================================================================
+
+resource "google_project_iam_member" "cloudbuild_run_admin" {
+  project = var.project_id
+  role    = "roles/run.admin"
+  member  = "serviceAccount:${google_service_account.cloudbuild_deployer.email}"
+}
+
+resource "google_project_iam_member" "cloudbuild_bigquery_admin" {
+  project = var.project_id
+  role    = "roles/bigquery.admin"
+  member  = "serviceAccount:${google_service_account.cloudbuild_deployer.email}"
+}
+
+resource "google_project_iam_member" "cloudbuild_sa_user" {
+  project = var.project_id
+  role    = "roles/iam.serviceAccountUser"
+  member  = "serviceAccount:${google_service_account.cloudbuild_deployer.email}"
+}
+
+# =============================================================================
+# IAM Bindings - Ingestion API
+# =============================================================================
+
+resource "google_project_iam_member" "ingestion_bigquery_editor" {
+  project = var.project_id
+  role    = "roles/bigquery.dataEditor"
+  member  = "serviceAccount:${google_service_account.ingestion_api.email}"
+}
+
+resource "google_project_iam_member" "ingestion_pubsub_publisher" {
+  project = var.project_id
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${google_service_account.ingestion_api.email}"
+}
+
+# =============================================================================
 # Output Values
 # =============================================================================
 
@@ -86,4 +148,14 @@ output "artifact_registry_url" {
 output "enabled_apis" {
   description = "List of enabled GCP APIs"
   value       = var.enable_apis
+}
+
+output "cloudbuild_deployer_email" {
+  description = "Email of the Cloud Build Deployer service account"
+  value       = google_service_account.cloudbuild_deployer.email
+}
+
+output "ingestion_api_email" {
+  description = "Email of the Ingestion API service account"
+  value       = google_service_account.ingestion_api.email
 }

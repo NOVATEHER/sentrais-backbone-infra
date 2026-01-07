@@ -106,7 +106,81 @@ setup_artifact_registry() {
 }
 
 # =============================================================================
-# Step 4: Display summary
+# Step 4: Create service accounts
+# =============================================================================
+setup_service_accounts() {
+    log_info "Setting up service accounts..."
+
+    # Cloud Build Deployer service account
+    if gcloud iam service-accounts describe "cloudbuild-deployer@${PROJECT_ID}.iam.gserviceaccount.com" &>/dev/null; then
+        log_warn "Service account cloudbuild-deployer already exists"
+    else
+        log_info "Creating service account: cloudbuild-deployer"
+        gcloud iam service-accounts create cloudbuild-deployer \
+            --display-name="Cloud Build Deployer" \
+            --project="${PROJECT_ID}"
+    fi
+
+    # Ingestion API service account
+    if gcloud iam service-accounts describe "ingestion-api@${PROJECT_ID}.iam.gserviceaccount.com" &>/dev/null; then
+        log_warn "Service account ingestion-api already exists"
+    else
+        log_info "Creating service account: ingestion-api"
+        gcloud iam service-accounts create ingestion-api \
+            --display-name="Ingestion API Service" \
+            --project="${PROJECT_ID}"
+    fi
+
+    log_info "Service accounts created successfully"
+}
+
+# =============================================================================
+# Step 5: Grant IAM permissions
+# =============================================================================
+setup_iam_bindings() {
+    log_info "Configuring IAM permissions..."
+
+    # Cloud Build Deployer permissions
+    log_info "Granting permissions to cloudbuild-deployer..."
+
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:cloudbuild-deployer@${PROJECT_ID}.iam.gserviceaccount.com" \
+        --role="roles/run.admin" \
+        --condition=None \
+        --quiet
+
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:cloudbuild-deployer@${PROJECT_ID}.iam.gserviceaccount.com" \
+        --role="roles/bigquery.admin" \
+        --condition=None \
+        --quiet
+
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:cloudbuild-deployer@${PROJECT_ID}.iam.gserviceaccount.com" \
+        --role="roles/iam.serviceAccountUser" \
+        --condition=None \
+        --quiet
+
+    # Ingestion API permissions
+    log_info "Granting permissions to ingestion-api..."
+
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:ingestion-api@${PROJECT_ID}.iam.gserviceaccount.com" \
+        --role="roles/bigquery.dataEditor" \
+        --condition=None \
+        --quiet
+
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:ingestion-api@${PROJECT_ID}.iam.gserviceaccount.com" \
+        --role="roles/pubsub.publisher" \
+        --condition=None \
+        --quiet
+
+    log_info "IAM permissions configured successfully"
+}
+
+# =============================================================================
+# Step 6: Display summary
 # =============================================================================
 display_summary() {
     echo ""
@@ -132,11 +206,21 @@ display_summary() {
     echo "  Repository: ${ARTIFACT_REPO_NAME}"
     echo "  URL: ${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO_NAME}"
     echo ""
+    echo "Service Accounts:"
+    echo "  cloudbuild-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
+    echo "    - roles/run.admin"
+    echo "    - roles/bigquery.admin"
+    echo "    - roles/iam.serviceAccountUser"
+    echo ""
+    echo "  ingestion-api@${PROJECT_ID}.iam.gserviceaccount.com"
+    echo "    - roles/bigquery.dataEditor"
+    echo "    - roles/pubsub.publisher"
+    echo ""
     echo "Next steps:"
     echo "  1. Link a billing account to the project"
-    echo "  2. Set up service accounts for CI/CD"
-    echo "  3. Configure Terraform backend (if using Terraform)"
-    echo "  4. Deploy infrastructure using Terraform"
+    echo "  2. Configure Terraform backend (if using Terraform)"
+    echo "  3. Deploy infrastructure using Terraform"
+    echo "  4. Set up Workload Identity for Cloud Run services"
     echo "============================================================================="
 }
 
@@ -150,6 +234,8 @@ main() {
     setup_project
     enable_apis
     setup_artifact_registry
+    setup_service_accounts
+    setup_iam_bindings
     display_summary
 }
 
