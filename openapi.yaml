@@ -1,0 +1,1125 @@
+openapi: 3.1.0
+info:
+  title: Sentrais Intelligence Backbone API
+  description: |
+    API for ingesting operational intelligence from client systems (EVERGAME, CiviGrid, eVenu, NFL IT)
+    into the Sentrais Unified Frame.
+    
+    ## Authentication
+    All requests must include a valid API token in the `X-Sentrais-Token` header.
+    
+    ## Rate Limiting
+    - Standard: 60 requests/minute, 10,000 requests/day
+    - Burst: 200 requests/minute for 5-minute windows during active events
+    
+    ## Client Isolation
+    Each API token is scoped to a specific client and engagement. Cross-client data access is prohibited.
+  version: 1.0.0
+  contact:
+    name: Sentrais Engineering
+    email: api@sentrais.com
+  license:
+    name: Proprietary
+    url: https://sentrais.com/license
+
+servers:
+  - url: https://api.sentrais.io/v1
+    description: Production
+  - url: https://api-staging.sentrais.io/v1
+    description: Staging
+  - url: http://localhost:8080/v1
+    description: Local Development
+
+security:
+  - ApiTokenAuth: []
+
+tags:
+  - name: Signals
+    description: SentraSignal ingestion and retrieval
+  - name: Events
+    description: Event management
+  - name: Incidents
+    description: Incident tracking
+  - name: Playbooks
+    description: Playbook retrieval and matching
+  - name: Health
+    description: API health and status
+
+paths:
+  # ============================================================================
+  # SIGNAL OPERATIONS
+  # ============================================================================
+  /signals:
+    post:
+      tags:
+        - Signals
+      summary: Submit one or more SentraSignals
+      description: |
+        Submit operational intelligence signals from client systems.
+        Supports batch submission of up to 100 signals per request.
+      operationId: submitSignals
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignalBatchRequest'
+            examples:
+              single_signal:
+                summary: Single signal submission
+                value:
+                  signals:
+                    - signal_type: observation
+                      category: crowd
+                      severity: 2
+                      confidence: 0.85
+                      description: "Gate A throughput below threshold"
+                      location:
+                        lat: 33.7553
+                        lng: -84.4006
+                        semantic: "Mercedes-Benz Stadium - Gate A"
+                      operational_phase: ingress
+                      conditions:
+                        temperature: 72
+                        crowd_density: 0.6
+              batch_signals:
+                summary: Batch submission
+                value:
+                  signals:
+                    - signal_type: threshold_breach
+                      category: crowd_density
+                      severity: 3
+                      description: "Section 120 density exceeds 0.8"
+                    - signal_type: decision
+                      category: crowd
+                      severity: 2
+                      description: "Opened auxiliary gates"
+                      decision:
+                        decision_made: "Open Gates B2, B3"
+                        decision_maker_role: "Operations Chief"
+                        expected_outcome: "Reduce density to 0.6 within 15 minutes"
+      responses:
+        '201':
+          description: Signals created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignalBatchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+    get:
+      tags:
+        - Signals
+      summary: Query signals
+      description: Retrieve signals with optional filtering. Only returns signals for the authenticated client.
+      operationId: querySignals
+      parameters:
+        - name: engagement_id
+          in: query
+          description: Filter by engagement
+          schema:
+            type: string
+        - name: signal_type
+          in: query
+          description: Filter by signal type
+          schema:
+            type: string
+            enum: [observation, anomaly, threshold_breach, decision, outcome, trend, prediction, escalation, resolution]
+        - name: category
+          in: query
+          description: Filter by category
+          schema:
+            type: string
+        - name: severity_min
+          in: query
+          description: Minimum severity (inclusive)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5
+        - name: severity_max
+          in: query
+          description: Maximum severity (inclusive)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5
+        - name: start_time
+          in: query
+          description: Start of time range (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: end_time
+          in: query
+          description: End of time range (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: event_id
+          in: query
+          description: Filter by event
+          schema:
+            type: string
+        - name: incident_id
+          in: query
+          description: Filter by incident
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum results to return
+          schema:
+            type: integer
+            default: 100
+            maximum: 1000
+        - name: cursor
+          in: query
+          description: Pagination cursor
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Signals retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignalQueryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /signals/{signal_id}:
+    get:
+      tags:
+        - Signals
+      summary: Get a specific signal
+      operationId: getSignal
+      parameters:
+        - name: signal_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Signal retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SentraSignal'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags:
+        - Signals
+      summary: Update signal outcome
+      description: Update a signal with outcome data after the fact
+      operationId: updateSignalOutcome
+      parameters:
+        - name: signal_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignalOutcomeUpdate'
+      responses:
+        '200':
+          description: Signal updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SentraSignal'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /signals/{signal_id}/relate:
+    post:
+      tags:
+        - Signals
+      summary: Create relationship between signals
+      operationId: relateSignals
+      parameters:
+        - name: signal_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - target_signal_id
+                - relationship_type
+              properties:
+                target_signal_id:
+                  type: string
+                relationship_type:
+                  type: string
+                  enum: [caused_by, resulted_in, correlated_with, supersedes, part_of]
+                confidence:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+      responses:
+        '201':
+          description: Relationship created
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================================
+  # EVENT OPERATIONS
+  # ============================================================================
+  /events:
+    post:
+      tags:
+        - Events
+      summary: Create an event
+      operationId: createEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventCreate'
+      responses:
+        '201':
+          description: Event created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+
+    get:
+      tags:
+        - Events
+      summary: List events
+      operationId: listEvents
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [scheduled, active, completed, cancelled, postponed]
+        - name: start_after
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: start_before
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Events retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Event'
+
+  /events/{event_id}:
+    get:
+      tags:
+        - Events
+      summary: Get event details
+      operationId: getEvent
+      parameters:
+        - name: event_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Event retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+
+    patch:
+      tags:
+        - Events
+      summary: Update event
+      operationId: updateEvent
+      parameters:
+        - name: event_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventUpdate'
+      responses:
+        '200':
+          description: Event updated
+
+  /events/{event_id}/signals:
+    get:
+      tags:
+        - Events
+        - Signals
+      summary: Get all signals for an event
+      operationId: getEventSignals
+      parameters:
+        - name: event_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Event signals retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignalQueryResponse'
+
+  # ============================================================================
+  # INCIDENT OPERATIONS
+  # ============================================================================
+  /incidents:
+    post:
+      tags:
+        - Incidents
+      summary: Create an incident
+      operationId: createIncident
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentCreate'
+      responses:
+        '201':
+          description: Incident created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+
+    get:
+      tags:
+        - Incidents
+      summary: List incidents
+      operationId: listIncidents
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, contained, resolved, closed]
+        - name: severity_min
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Incidents retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  incidents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Incident'
+
+  /incidents/{incident_id}:
+    patch:
+      tags:
+        - Incidents
+      summary: Update incident status
+      operationId: updateIncident
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentUpdate'
+      responses:
+        '200':
+          description: Incident updated
+
+  # ============================================================================
+  # PLAYBOOK OPERATIONS
+  # ============================================================================
+  /playbooks/match:
+    post:
+      tags:
+        - Playbooks
+      summary: Find matching playbooks for current conditions
+      description: |
+        Given current operational conditions, returns playbooks that may be applicable.
+        This is the core SIPE engine entry point for decision support.
+      operationId: matchPlaybooks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                conditions:
+                  type: object
+                  description: Current operational conditions
+                  additionalProperties: true
+                signal_id:
+                  type: string
+                  description: Optional signal to match against
+                vertical_id:
+                  type: string
+                include_cross_vertical:
+                  type: boolean
+                  default: true
+                  description: Include playbooks from other verticals
+      responses:
+        '200':
+          description: Matching playbooks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matches:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        playbook_id:
+                          type: string
+                        playbook_code:
+                          type: string
+                        playbook_name:
+                          type: string
+                        match_score:
+                          type: number
+                        conditions_matched:
+                          type: array
+                          items:
+                            type: string
+                        source_vertical:
+                          type: string
+                        evidence_success_rate:
+                          type: number
+
+  /playbooks/{playbook_id}:
+    get:
+      tags:
+        - Playbooks
+      summary: Get playbook details
+      operationId: getPlaybook
+      parameters:
+        - name: playbook_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Playbook retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playbook'
+
+  /playbooks/{playbook_id}/apply:
+    post:
+      tags:
+        - Playbooks
+      summary: Record playbook application
+      description: Record that a playbook was applied in response to a signal
+      operationId: applyPlaybook
+      parameters:
+        - name: playbook_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - signal_id
+              properties:
+                signal_id:
+                  type: string
+                actions_taken:
+                  type: array
+                  items:
+                    type: string
+                adaptations_made:
+                  type: string
+      responses:
+        '201':
+          description: Application recorded
+
+  # ============================================================================
+  # VERTICAL EXTENSIONS
+  # ============================================================================
+  /signals/{signal_id}/extension/{vertical}:
+    put:
+      tags:
+        - Signals
+      summary: Add vertical-specific extension data
+      operationId: addSignalExtension
+      parameters:
+        - name: signal_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vertical
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [sports_entertainment, live_events, aviation_transportation, federal_emergency, mega_events, critical_infrastructure, venue_operations, civic_government]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: Vertical-specific extension data (schema varies by vertical)
+      responses:
+        '200':
+          description: Extension added
+
+  # ============================================================================
+  # HEALTH & DIAGNOSTICS
+  # ============================================================================
+  /health:
+    get:
+      tags:
+        - Health
+      summary: API health check
+      security: []
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy, degraded, unhealthy]
+                  timestamp:
+                    type: string
+                    format: date-time
+                  version:
+                    type: string
+
+  /diagnostics/token:
+    get:
+      tags:
+        - Health
+      summary: Validate token and return permissions
+      responses:
+        '200':
+          description: Token information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  client_id:
+                    type: string
+                  engagement_id:
+                    type: string
+                  permissions:
+                    type: array
+                    items:
+                      type: string
+                  rate_limit_remaining:
+                    type: integer
+                  rate_limit_reset:
+                    type: string
+                    format: date-time
+
+# ============================================================================
+# COMPONENTS
+# ============================================================================
+components:
+  securitySchemes:
+    ApiTokenAuth:
+      type: apiKey
+      in: header
+      name: X-Sentrais-Token
+
+  schemas:
+    # --------------------------------------------------------------------------
+    # Signal Schemas
+    # --------------------------------------------------------------------------
+    SentraSignal:
+      type: object
+      required:
+        - signal_type
+        - category
+      properties:
+        signal_id:
+          type: string
+          readOnly: true
+        signal_timestamp:
+          type: string
+          format: date-time
+        source_system:
+          type: string
+        vertical_id:
+          type: string
+        engagement_id:
+          type: string
+        client_id:
+          type: string
+          readOnly: true
+        signal_type:
+          type: string
+          enum: [observation, anomaly, threshold_breach, decision, outcome, trend, prediction, escalation, resolution]
+        category:
+          type: string
+        subcategory:
+          type: string
+        severity:
+          type: integer
+          minimum: 1
+          maximum: 5
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        description:
+          type: string
+        location:
+          $ref: '#/components/schemas/Location'
+        operational_phase:
+          type: string
+          enum: [planning, pre_event, ingress, active, egress, post_event, steady_state, escalation, response, recovery]
+        event_id:
+          type: string
+        incident_id:
+          type: string
+        conditions:
+          type: object
+          additionalProperties: true
+        entities:
+          type: array
+          items:
+            $ref: '#/components/schemas/Entity'
+        related_signal_ids:
+          type: array
+          items:
+            type: string
+        decision:
+          $ref: '#/components/schemas/Decision'
+        outcome:
+          $ref: '#/components/schemas/Outcome'
+        nin_classification:
+          $ref: '#/components/schemas/NinClassification'
+        raw_payload:
+          type: object
+          additionalProperties: true
+
+    Location:
+      type: object
+      properties:
+        lat:
+          type: number
+        lng:
+          type: number
+        semantic:
+          type: string
+        zone:
+          type: string
+
+    Entity:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [person, crowd, asset, system, organization, vehicle]
+        id:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+        count:
+          type: integer
+        status:
+          type: string
+
+    Decision:
+      type: object
+      properties:
+        decision_made:
+          type: string
+        decision_maker_role:
+          type: string
+        decision_maker_id:
+          type: string
+        options_considered:
+          type: array
+          items:
+            type: string
+        rationale:
+          type: string
+        expected_outcome:
+          type: string
+
+    Outcome:
+      type: object
+      properties:
+        actual_outcome:
+          type: string
+        outcome_delta:
+          type: string
+        cascading_effects:
+          type: array
+          items:
+            type: string
+        time_to_resolution_minutes:
+          type: integer
+        effectiveness_score:
+          type: integer
+          minimum: 1
+          maximum: 5
+
+    NinClassification:
+      type: object
+      properties:
+        nin_phase:
+          type: string
+        playbook_id:
+          type: string
+        pattern_tags:
+          type: array
+          items:
+            type: string
+        cross_vertical_relevance:
+          type: array
+          items:
+            type: string
+
+    SignalBatchRequest:
+      type: object
+      required:
+        - signals
+      properties:
+        signals:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/SentraSignal'
+        engagement_id:
+          type: string
+          description: Default engagement for all signals in batch
+        event_id:
+          type: string
+          description: Default event for all signals in batch
+
+    SignalBatchResponse:
+      type: object
+      properties:
+        created:
+          type: integer
+        signal_ids:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+              error:
+                type: string
+
+    SignalQueryResponse:
+      type: object
+      properties:
+        signals:
+          type: array
+          items:
+            $ref: '#/components/schemas/SentraSignal'
+        total_count:
+          type: integer
+        cursor:
+          type: string
+
+    SignalOutcomeUpdate:
+      type: object
+      properties:
+        outcome:
+          $ref: '#/components/schemas/Outcome'
+        lesson_extracted:
+          type: boolean
+
+    # --------------------------------------------------------------------------
+    # Event Schemas
+    # --------------------------------------------------------------------------
+    Event:
+      type: object
+      properties:
+        event_id:
+          type: string
+        event_name:
+          type: string
+        event_type:
+          type: string
+        venue_name:
+          type: string
+        venue_capacity:
+          type: integer
+        scheduled_start:
+          type: string
+          format: date-time
+        scheduled_end:
+          type: string
+          format: date-time
+        expected_attendance:
+          type: integer
+        status:
+          type: string
+          enum: [scheduled, active, completed, cancelled, postponed]
+        metadata:
+          type: object
+          additionalProperties: true
+
+    EventCreate:
+      type: object
+      required:
+        - event_name
+        - scheduled_start
+      properties:
+        event_name:
+          type: string
+        event_type:
+          type: string
+        venue_name:
+          type: string
+        venue_capacity:
+          type: integer
+        scheduled_start:
+          type: string
+          format: date-time
+        scheduled_end:
+          type: string
+          format: date-time
+        expected_attendance:
+          type: integer
+        metadata:
+          type: object
+
+    EventUpdate:
+      type: object
+      properties:
+        actual_start:
+          type: string
+          format: date-time
+        actual_end:
+          type: string
+          format: date-time
+        actual_attendance:
+          type: integer
+        status:
+          type: string
+          enum: [scheduled, active, completed, cancelled, postponed]
+
+    # --------------------------------------------------------------------------
+    # Incident Schemas
+    # --------------------------------------------------------------------------
+    Incident:
+      type: object
+      properties:
+        incident_id:
+          type: string
+        incident_name:
+          type: string
+        incident_type:
+          type: string
+        severity:
+          type: integer
+        status:
+          type: string
+          enum: [active, contained, resolved, closed]
+        detected_at:
+          type: string
+          format: date-time
+        location_semantic:
+          type: string
+
+    IncidentCreate:
+      type: object
+      required:
+        - incident_type
+        - severity
+      properties:
+        incident_name:
+          type: string
+        incident_type:
+          type: string
+        severity:
+          type: integer
+          minimum: 1
+          maximum: 5
+        location:
+          $ref: '#/components/schemas/Location'
+        event_id:
+          type: string
+
+    IncidentUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [active, contained, resolved, closed]
+        acknowledged_at:
+          type: string
+          format: date-time
+        response_started_at:
+          type: string
+          format: date-time
+        contained_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+        root_cause:
+          type: string
+        lessons_learned:
+          type: array
+          items:
+            type: string
+
+    # --------------------------------------------------------------------------
+    # Playbook Schemas
+    # --------------------------------------------------------------------------
+    Playbook:
+      type: object
+      properties:
+        playbook_id:
+          type: string
+        playbook_code:
+          type: string
+        playbook_name:
+          type: string
+        playbook_description:
+          type: string
+        category_id:
+          type: string
+        trigger_conditions:
+          type: object
+        response_actions:
+          type: object
+        decision_authority:
+          type: object
+        success_metrics:
+          type: object
+        evidence_success_rate:
+          type: number
+        evidence_instances:
+          type: integer
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              details:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    field:
+                      type: string
+                    message:
+                      type: string
+
+    Unauthorized:
+      description: Invalid or missing authentication
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          schema:
+            type: string
+            format: date-time
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              retry_after:
+                type: integer

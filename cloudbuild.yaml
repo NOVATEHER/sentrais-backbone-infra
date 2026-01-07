@@ -1,0 +1,120 @@
+# Sentrais Intelligence Backbone - Cloud Build Configuration
+# Builds and deploys the Ingestion API to Cloud Run
+
+steps:
+  # Step 1: Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/sentrais-repo/ingestion-api:${SHORT_SHA}'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/sentrais-repo/ingestion-api:latest'
+      - '-f'
+      - 'services/ingestion_api/Dockerfile'
+      - 'services/ingestion_api'
+    id: 'build-image'
+
+  # Step 2: Push the Docker image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/sentrais-repo/ingestion-api:${SHORT_SHA}'
+    id: 'push-image'
+    waitFor: ['build-image']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/sentrais-repo/ingestion-api:latest'
+    waitFor: ['push-image']
+
+  # Step 3: Deploy to Cloud Run (Staging)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'ingestion-api-staging'
+      - '--image'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/sentrais-repo/ingestion-api:${SHORT_SHA}'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'  # API handles its own auth
+      - '--set-env-vars'
+      - 'GCP_PROJECT_ID=${PROJECT_ID},BQ_DATASET_ID=sentrais_backbone,ENVIRONMENT=staging,PUBSUB_TOPIC=sentrasignal-ingestion-staging'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '10'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--timeout'
+      - '60s'
+      - '--concurrency'
+      - '80'
+      - '--service-account'
+      - 'ingestion-api@${PROJECT_ID}.iam.gserviceaccount.com'
+    id: 'deploy-staging'
+    waitFor: ['push-image']
+
+  # Step 4: Run integration tests against staging
+  - name: 'python:3.11-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install httpx pytest
+        # Run integration tests
+        # pytest tests/integration/ --staging-url=https://ingestion-api-staging-xxxxx.run.app
+        echo "Integration tests would run here"
+    id: 'integration-tests'
+    waitFor: ['deploy-staging']
+
+  # Step 5: Deploy to Cloud Run (Production) - only on main branch
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if [ "$BRANCH_NAME" = "main" ]; then
+          gcloud run deploy ingestion-api \
+            --image us-central1-docker.pkg.dev/${PROJECT_ID}/sentrais-repo/ingestion-api:${SHORT_SHA} \
+            --region us-central1 \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars "GCP_PROJECT_ID=${PROJECT_ID},BQ_DATASET_ID=sentrais_backbone,ENVIRONMENT=production,PUBSUB_TOPIC=sentrasignal-ingestion" \
+            --min-instances 1 \
+            --max-instances 100 \
+            --memory 1Gi \
+            --cpu 2 \
+            --timeout 60s \
+            --concurrency 80 \
+            --service-account ingestion-api@${PROJECT_ID}.iam.gserviceaccount.com
+          echo "Deployed to production"
+        else
+          echo "Skipping production deployment (not main branch)"
+        fi
+    id: 'deploy-production'
+    waitFor: ['integration-tests']
+
+# Build options
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+
+# Substitutions (can be overridden)
+substitutions:
+  _REGION: 'us-central1'
+
+# Images to store in Artifact Registry
+images:
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/sentrais-repo/ingestion-api:${SHORT_SHA}'
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/sentrais-repo/ingestion-api:latest'
+
+# Timeout for the entire build
+timeout: '1200s'
