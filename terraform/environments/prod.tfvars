@@ -1,0 +1,16 @@
+# =============================================================================
+# Sentrais Intelligence Backbone - Production Environment
+# =============================================================================
+
+project_id   = "sentrais-backbone"
+project_name = "Sentrais Intelligence Backbone"
+region       = "us-central1"
+zone         = "us-central1-a"
+
+artifact_registry_repository = "sentrais-repo"
+
+labels = {
+  project     = "sentrais-backbone"
+  environment = "production"
+  managed_by  = "terraform"
+}
