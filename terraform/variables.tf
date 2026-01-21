@@ -44,6 +44,10 @@ variable "enable_apis" {
     "artifactregistry.googleapis.com",
     "iam.googleapis.com",
     "cloudresourcemanager.googleapis.com",
+    "aiplatform.googleapis.com",
+    "containerscanning.googleapis.com",
+    "logging.googleapis.com",
+    "monitoring.googleapis.com",
   ]
 }
 

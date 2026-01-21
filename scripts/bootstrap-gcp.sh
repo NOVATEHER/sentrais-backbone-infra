@@ -71,6 +71,10 @@ enable_apis() {
         "artifactregistry.googleapis.com"
         "iam.googleapis.com"
         "cloudresourcemanager.googleapis.com"
+        "aiplatform.googleapis.com"
+        "containerscanning.googleapis.com"
+        "logging.googleapis.com"
+        "monitoring.googleapis.com"
     )
 
     for api in "${apis[@]}"; do
@@ -201,6 +205,10 @@ display_summary() {
     echo "  - Artifact Registry"
     echo "  - IAM"
     echo "  - Cloud Resource Manager"
+    echo "  - Vertex AI (Gemini)"
+    echo "  - Container Scanning"
+    echo "  - Cloud Logging"
+    echo "  - Cloud Monitoring"
     echo ""
     echo "Artifact Registry:"
     echo "  Repository: ${ARTIFACT_REPO_NAME}"

@@ -1,162 +1,137 @@
-# Automation Setup Guide
+# Google Cloud Native Automation Setup Guide
 
-Complete guide for setting up CI/CD automation for the Sentrais Intelligence Backbone.
+Complete guide for setting up CI/CD automation using Google Cloud Build and Vertex AI (Gemini) for the Sentrais Intelligence Backbone.
+
+## Overview
+
+This infrastructure uses **100% Google Cloud native tools**:
+- **Cloud Build** - CI/CD pipeline orchestration
+- **Vertex AI (Gemini)** - AI-powered code analysis
+- **Artifact Registry** - Container image storage
+- **Cloud Run** - Serverless container deployment
+- **Container Scanning** - Security vulnerability detection
+- **Cloud Logging** - Centralized logging
+- **Cloud Monitoring** - Observability
+
+---
 
 ## Prerequisites
 
-- GCP Project(s) created:
-  - `sentrais-backbone` (production)
-  - `sentrais-backbone-dev` (staging/dev)
-- GitHub repository access
-- Terraform >= 1.5.0
+- GCP Project with billing enabled
+- `gcloud` CLI installed and authenticated
+- Repository connected to Cloud Build
 
 ---
 
 ## 1. Initial GCP Setup
 
-Run the bootstrap script once per environment:
+Run the bootstrap script to enable all required APIs and create service accounts:
 
 ```bash
-# Development/Staging
-GCP_PROJECT_ID=sentrais-backbone-dev ./scripts/bootstrap-gcp.sh
+# Set your project ID
+export GCP_PROJECT_ID=sentrais-backbone-dev
 
-# Production
-GCP_PROJECT_ID=sentrais-backbone ./scripts/bootstrap-gcp.sh
+# Run bootstrap
+chmod +x scripts/bootstrap-gcp.sh
+./scripts/bootstrap-gcp.sh
 ```
 
-This enables APIs, creates service accounts, and sets up Artifact Registry.
+This enables:
+- BigQuery, Cloud Run, Cloud Build, Pub/Sub
+- Secret Manager, Artifact Registry, IAM
+- **Vertex AI (Gemini)** for AI code analysis
+- **Container Scanning** for security
+- Cloud Logging & Monitoring
 
 ---
 
-## 2. GitHub Actions Setup
+## 2. Cloud Build Setup
 
-### 2.1 Configure Workload Identity Federation
+### 2.1 Connect Repository
 
-Set up keyless authentication between GitHub and GCP:
+1. Go to [Cloud Build Triggers](https://console.cloud.google.com/cloud-build/triggers)
+2. Click **Connect Repository**
+3. Select **GitHub** and authorize
+4. Choose your repository
 
-```bash
-# Create Workload Identity Pool
-gcloud iam workload-identity-pools create "github-pool" \
-  --project="sentrais-backbone" \
-  --location="global" \
-  --display-name="GitHub Actions Pool"
-
-# Create Provider
-gcloud iam workload-identity-pools providers create-oidc "github-provider" \
-  --project="sentrais-backbone" \
-  --location="global" \
-  --workload-identity-pool="github-pool" \
-  --display-name="GitHub Provider" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
-  --issuer-uri="https://token.actions.githubusercontent.com"
-
-# Get the Workload Identity Provider resource name
-gcloud iam workload-identity-pools providers describe "github-provider" \
-  --project="sentrais-backbone" \
-  --location="global" \
-  --workload-identity-pool="github-pool" \
-  --format="value(name)"
-```
-
-### 2.2 Create CI/CD Service Account
+### 2.2 Create Build Triggers
 
 ```bash
-# Create service account for GitHub Actions
-gcloud iam service-accounts create github-actions \
-  --display-name="GitHub Actions CI/CD"
-
-# Grant required roles
-PROJECT_ID=sentrais-backbone
-SA_EMAIL=github-actions@${PROJECT_ID}.iam.gserviceaccount.com
-
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-  --member="serviceAccount:${SA_EMAIL}" \
-  --role="roles/run.admin"
-
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-  --member="serviceAccount:${SA_EMAIL}" \
-  --role="roles/artifactregistry.writer"
-
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-  --member="serviceAccount:${SA_EMAIL}" \
-  --role="roles/iam.serviceAccountUser"
-
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-  --member="serviceAccount:${SA_EMAIL}" \
-  --role="roles/bigquery.admin"
-
-# Allow GitHub to impersonate this service account
-gcloud iam service-accounts add-iam-policy-binding ${SA_EMAIL} \
-  --project=${PROJECT_ID} \
-  --role="roles/iam.workloadIdentityUser" \
-  --member="principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github-pool/attribute.repository/YOUR_ORG/sentrais-backbone"
-```
-
-### 2.3 Configure GitHub Secrets
-
-Add these secrets to your GitHub repository:
-
-| Secret | Value |
-|--------|-------|
-| `GCP_WORKLOAD_IDENTITY_PROVIDER` | Output from step 2.1 |
-| `GCP_SERVICE_ACCOUNT_STAGING` | `github-actions@sentrais-backbone-dev.iam.gserviceaccount.com` |
-| `GCP_SERVICE_ACCOUNT_PROD` | `github-actions@sentrais-backbone.iam.gserviceaccount.com` |
-
-### 2.4 Configure Environments
-
-In GitHub repository settings, create two environments:
-
-1. **staging**
-   - No protection rules (auto-deploy)
-
-2. **production**
-   - Required reviewers (add team members)
-   - Wait timer: 5 minutes (optional)
-
----
-
-## 3. Cloud Build Setup (Alternative)
-
-If using Cloud Build instead of GitHub Actions:
-
-### 3.1 Create Cloud Build Trigger
-
-```bash
-# Connect repository (do this in Console first)
-# Then create triggers:
+PROJECT_ID=sentrais-backbone-dev
+REPO_OWNER=NOVATEHER
+REPO_NAME=sentrais-backbone-infra
 
 # Staging trigger (develop branch)
 gcloud builds triggers create github \
   --name="deploy-staging" \
-  --repo-name="sentrais-backbone" \
-  --repo-owner="YOUR_ORG" \
+  --repo-name="$REPO_NAME" \
+  --repo-owner="$REPO_OWNER" \
   --branch-pattern="^develop$" \
-  --build-config="cloudbuild.yaml"
+  --build-config="cloudbuild.yaml" \
+  --project="$PROJECT_ID"
 
 # Production trigger (main branch)
 gcloud builds triggers create github \
   --name="deploy-production" \
-  --repo-name="sentrais-backbone" \
-  --repo-owner="YOUR_ORG" \
+  --repo-name="$REPO_NAME" \
+  --repo-owner="$REPO_OWNER" \
   --branch-pattern="^main$" \
-  --build-config="cloudbuild.yaml"
+  --build-config="cloudbuild.yaml" \
+  --project="$PROJECT_ID"
 ```
 
-### 3.2 Grant Cloud Build Permissions
+### 2.3 Grant Cloud Build Permissions
 
 ```bash
-PROJECT_ID=sentrais-backbone
+PROJECT_ID=sentrais-backbone-dev
 PROJECT_NUMBER=$(gcloud projects describe ${PROJECT_ID} --format='value(projectNumber)')
 CLOUDBUILD_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
 
+# Cloud Run deployment
 gcloud projects add-iam-policy-binding ${PROJECT_ID} \
   --member="serviceAccount:${CLOUDBUILD_SA}" \
   --role="roles/run.admin"
 
+# Service account impersonation
 gcloud projects add-iam-policy-binding ${PROJECT_ID} \
   --member="serviceAccount:${CLOUDBUILD_SA}" \
   --role="roles/iam.serviceAccountUser"
+
+# Artifact Registry
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+  --member="serviceAccount:${CLOUDBUILD_SA}" \
+  --role="roles/artifactregistry.writer"
+
+# Vertex AI (for Gemini code analysis)
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+  --member="serviceAccount:${CLOUDBUILD_SA}" \
+  --role="roles/aiplatform.user"
+
+# Logging
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+  --member="serviceAccount:${CLOUDBUILD_SA}" \
+  --role="roles/logging.logWriter"
 ```
+
+---
+
+## 3. Pipeline Stages
+
+The `cloudbuild.yaml` pipeline includes:
+
+| Stage | Description |
+|-------|-------------|
+| `detect-environment` | Determines staging/production from branch |
+| `gemini-code-review` | AI-powered code analysis using Vertex AI |
+| `terraform-init` | Initialize Terraform |
+| `terraform-plan` | Plan infrastructure changes |
+| `terraform-apply` | Apply infrastructure |
+| `build-container` | Build Docker image |
+| `push-container` | Push to Artifact Registry |
+| `security-scan` | Container vulnerability scanning |
+| `deploy-cloud-run` | Deploy to Cloud Run |
+| `health-check` | Verify deployment |
+| `build-summary` | Log results |
 
 ---
 
@@ -167,18 +142,20 @@ For team collaboration, configure remote state:
 ### 4.1 Create State Bucket
 
 ```bash
-gsutil mb -p sentrais-backbone -l us-central1 gs://sentrais-backbone-terraform-state
-gsutil versioning set on gs://sentrais-backbone-terraform-state
+PROJECT_ID=sentrais-backbone-dev
+
+gsutil mb -p ${PROJECT_ID} -l us-central1 gs://${PROJECT_ID}-terraform-state
+gsutil versioning set on gs://${PROJECT_ID}-terraform-state
 ```
 
-### 4.2 Update terraform/main.tf
+### 4.2 Enable Backend in terraform/main.tf
 
-Uncomment the backend configuration:
+Uncomment:
 
 ```hcl
 terraform {
   backend "gcs" {
-    bucket = "sentrais-backbone-terraform-state"
+    bucket = "sentrais-backbone-dev-terraform-state"
     prefix = "terraform/state"
   }
 }
@@ -188,130 +165,198 @@ terraform {
 
 ## 5. Deployment Workflow
 
-### Development Flow
+### Branch Strategy
 
 ```
-Feature Branch → PR → Tests Run → Merge to develop → Deploy to Staging
-                                                           ↓
-                                        Merge to main → Deploy to Production
+Feature Branch → PR → Merge to develop → Deploy to Staging
+                                              ↓
+                        Merge to main → Deploy to Production
 ```
 
-### Commands
+### Deploy Commands
 
 ```bash
 # Deploy to staging
 git checkout develop
 git merge feature/my-feature
 git push origin develop
+# Cloud Build automatically triggers
 
 # Deploy to production
 git checkout main
 git merge develop
 git push origin main
+# Cloud Build automatically triggers
 ```
 
-### Verify Deployment
+### Manual Trigger
+
+```bash
+# Submit build manually
+gcloud builds submit --config=cloudbuild.yaml
+
+# Trigger specific build
+gcloud builds triggers run deploy-staging --branch=develop
+```
+
+---
+
+## 6. Verify Deployment
 
 ```bash
 # Get service URL
-gcloud run services describe ingestion-api \
+gcloud run services describe ingestion-api-staging \
   --region us-central1 \
   --format 'value(status.url)'
 
 # Test health endpoint
-curl https://ingestion-api-xxx.run.app/health
-```
+curl https://ingestion-api-staging-xxx.run.app/health
 
----
-
-## 6. Rollback Procedures
-
-### Rollback Cloud Run
-
-```bash
-# List revisions
-gcloud run revisions list --service=ingestion-api --region=us-central1
-
-# Route traffic to previous revision
-gcloud run services update-traffic ingestion-api \
-  --region=us-central1 \
-  --to-revisions=ingestion-api-PREVIOUS_REVISION=100
-```
-
-### Rollback Terraform
-
-```bash
-# Revert to previous commit
-git revert HEAD
-git push origin main
-
-# Or manually apply previous state
-terraform apply -var-file=environments/prod.tfvars
-```
-
----
-
-## 7. Monitoring
-
-### Cloud Run Logs
-
-```bash
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=ingestion-api" \
-  --limit=50 \
-  --format=json
-```
-
-### Build History
-
-```bash
-# GitHub Actions
-gh run list --workflow=deploy.yml
-
-# Cloud Build
+# View recent builds
 gcloud builds list --limit=10
 ```
 
 ---
 
-## Troubleshooting
+## 7. Monitoring & Logs
 
-### Authentication Errors
-
-```bash
-# Verify Workload Identity setup
-gcloud iam workload-identity-pools providers describe github-provider \
-  --project=sentrais-backbone \
-  --location=global \
-  --workload-identity-pool=github-pool
-```
-
-### Permission Denied
+### Cloud Build Logs
 
 ```bash
-# Check service account roles
-gcloud projects get-iam-policy sentrais-backbone \
-  --flatten="bindings[].members" \
-  --filter="bindings.members:github-actions@" \
-  --format="table(bindings.role)"
+# List recent builds
+gcloud builds list --limit=10
+
+# View specific build
+gcloud builds log BUILD_ID
+
+# Stream logs
+gcloud builds log BUILD_ID --stream
 ```
+
+### Cloud Run Logs
+
+```bash
+# View service logs
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=ingestion-api-staging" \
+  --limit=50 \
+  --format=json
+```
+
+### Build Notifications (via Cloud Logging)
+
+```bash
+# View build results
+gcloud logging read 'logName="projects/PROJECT_ID/logs/sentrais-build-log"' \
+  --limit=20 \
+  --format=json
+```
+
+---
+
+## 8. Rollback Procedures
+
+### Rollback Cloud Run
+
+```bash
+# List revisions
+gcloud run revisions list --service=ingestion-api-staging --region=us-central1
+
+# Route traffic to previous revision
+gcloud run services update-traffic ingestion-api-staging \
+  --region=us-central1 \
+  --to-revisions=ingestion-api-staging-PREVIOUS_REVISION=100
+```
+
+### Rollback via Git
+
+```bash
+# Revert last commit
+git revert HEAD
+git push origin develop
+# Cloud Build will redeploy
+```
+
+---
+
+## 9. Security Features
+
+### Container Scanning
+
+Automatic vulnerability scanning on every push to Artifact Registry:
+
+```bash
+# View scan results
+gcloud artifacts docker images list-vulnerabilities \
+  us-central1-docker.pkg.dev/PROJECT_ID/sentrais-repo/ingestion-api:latest
+```
+
+### Gemini Code Analysis
+
+AI-powered code review runs on every build, checking for:
+- Security vulnerabilities
+- Best practices violations
+- Code quality issues
+
+---
+
+## 10. Troubleshooting
 
 ### Build Failures
 
-1. Check Cloud Build logs in Console
-2. Verify Dockerfile builds locally
-3. Check service account permissions
+```bash
+# Check build logs
+gcloud builds log BUILD_ID
+
+# Check Cloud Build service account permissions
+gcloud projects get-iam-policy PROJECT_ID \
+  --flatten="bindings[].members" \
+  --filter="bindings.members:cloudbuild" \
+  --format="table(bindings.role)"
+```
+
+### API Not Enabled
+
+```bash
+# Enable missing API
+gcloud services enable SERVICE_NAME.googleapis.com
+
+# Verify enabled APIs
+gcloud services list --enabled
+```
+
+### Terraform Errors
+
+```bash
+# Re-initialize terraform
+cd terraform
+terraform init -upgrade
+terraform validate
+```
 
 ---
 
 ## Security Checklist
 
-- [ ] Workload Identity Federation configured (no service account keys)
-- [ ] Production environment requires approval
-- [ ] Secrets stored in GitHub Secrets / Secret Manager
+- [ ] Billing enabled on project
+- [ ] All required APIs enabled
+- [ ] Cloud Build service account has required roles
 - [ ] Terraform state bucket has versioning enabled
+- [ ] Container scanning enabled
 - [ ] Service accounts follow least-privilege principle
-- [ ] API tokens rotated regularly
+- [ ] Secrets stored in Secret Manager (not in code)
 
 ---
 
-*Sentrais Engineering*
+## Quick Reference
+
+| Task | Command |
+|------|---------|
+| Run bootstrap | `./scripts/bootstrap-gcp.sh` |
+| Manual build | `gcloud builds submit --config=cloudbuild.yaml` |
+| List builds | `gcloud builds list --limit=10` |
+| View logs | `gcloud builds log BUILD_ID` |
+| Get service URL | `gcloud run services describe SERVICE --region=us-central1 --format='value(status.url)'` |
+
+---
+
+*Sentrais Engineering - Google Cloud Native*
